@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://audio-to-midi.vercel.app";
+const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://audio-to-midi-six.vercel.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),
@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   description:
     "Convert audio, MP3, WAV, voice or hummed melodies to clean MIDI (.mid) online for free. Built-in stray-note filter, scale lock and piano roll preview — 100% in your browser.",
   alternates: { canonical: "/" },
+  verification: {
+    google: "OzbbXwBKIAGRAIV-NCTTfkOO6b3YAXZjqWxCrmygypM",
+  },
   openGraph: {
     title: "Audio to MIDI Converter Online Free – With Stray-Note Cleaner",
     description: "Turn voice, humming, MP3 or WAV melodies into clean DAW-ready MIDI files in your browser.",
