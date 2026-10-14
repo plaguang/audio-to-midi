@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { trackToolEvent } from "@/lib/analytics";
 
 type Mode = "avg" | "left" | "right" | "side";
 
@@ -94,10 +95,12 @@ export default function StereoMonoConverter() {
     const l = new Float32Array(ab.getChannelData(0));
     const r = ab.numberOfChannels > 1 ? new Float32Array(ab.getChannelData(1)) : new Float32Array(l);
     await ctx.close();
+    const pc = phaseCorrelation(l, r);
     setSr(ab.sampleRate);
     setLeft(l);
     setRight(r);
-    setCorr(phaseCorrelation(l, r));
+    setCorr(pc);
+    trackToolEvent("stereo_file_upload", { channels: ab.numberOfChannels, corr: Number(pc.toFixed(2)) });
   }
 
   async function loadDemoStereo() {
@@ -118,6 +121,7 @@ export default function StereoMonoConverter() {
     setLeft(l);
     setRight(r);
     setCorr(phaseCorrelation(l, r));
+    trackToolEvent("stereo_demo_load");
   }
 
   function buildMono(): Float32Array {
@@ -252,6 +256,7 @@ export default function StereoMonoConverter() {
     a.download = `${fileName || "audio"}-mono-${mode}.wav`;
     a.click();
     URL.revokeObjectURL(url);
+    trackToolEvent("download_mono_wav", { mode, normalize });
   }
 
   return (

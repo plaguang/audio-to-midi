@@ -26,6 +26,13 @@ const assert = (cond, msg) => {
   const navCount = await page.locator('header nav a').count();
   assert(navCount === 6, `Sticky top navbar renders all 6 tool links (got: ${navCount})`);
 
+  // Verify Analytics (GA4 + Microsoft Clarity + Vercel Analytics) are injected
+  const htmlContent = await page.content();
+  assert(
+    htmlContent.includes('G-8764ZP2KQ1') && htmlContent.includes('yxcpqk8xbw'),
+    'GA4 (G-8764ZP2KQ1) and Microsoft Clarity (yxcpqk8xbw) scripts are active on page'
+  );
+
   // Load Demo Melody (with stray notes)
   await page.getByRole('button', { name: /Load Demo Melody/i }).click();
   await page.waitForSelector('[data-testid="note-stats"]', { timeout: 10000 });

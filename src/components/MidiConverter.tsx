@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { trackToolEvent } from "@/lib/analytics";
 
 export type RawNote = {
   midi: number;
@@ -339,6 +340,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     setSourceAudio({ samples: mono, sr: ab.sampleRate });
     setRawNotes(notes);
     setBusy("");
+    trackToolEvent("audio_upload", { rawNotes: notes.length });
   }
 
   async function loadDemo() {
@@ -352,18 +354,21 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     setSourceAudio({ samples, sr });
     setRawNotes(notes);
     setBusy("");
+    trackToolEvent("demo_melody_load", { rawNotes: notes.length });
   }
 
   function handleAutoDetectKey() {
     const { scaleName, confidence } = detectBestScale(rawNotes);
     setScale(scaleName);
     setDetectedKeyInfo(`Auto-locked: ${scaleName} (${confidence}% match)`);
+    trackToolEvent("auto_detect_key", { scale: scaleName, confidence });
   }
 
   async function toggleMic() {
     if (recording && mediaRec.current) {
       mediaRec.current.stop();
       setRecording(false);
+      trackToolEvent("mic_record_complete");
       return;
     }
     try {
@@ -379,6 +384,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
       mediaRec.current = rec;
       rec.start();
       setRecording(true);
+      trackToolEvent("mic_record_start");
     } catch {
       alert("Microphone permission denied or unavailable. Try 'Load Demo Melody' or upload an audio file.");
     }
@@ -599,6 +605,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     a.download = `${fileName || "melody"}.mid`;
     a.click();
     URL.revokeObjectURL(url);
+    trackToolEvent("download_midi", { notes: cleanedNotes.length, scale, bpm });
   }
 
   async function copyNoteNames() {
@@ -606,6 +613,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
+    trackToolEvent("copy_note_names", { notes: cleanedNotes.length });
   }
 
   return (
