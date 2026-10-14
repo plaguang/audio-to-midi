@@ -11,16 +11,22 @@ export type RawNote = {
 };
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-const midiToName = (m: number) => `${NOTE_NAMES[m % 12]}${Math.floor(m / 12) - 1}`;
+const midiToName = (m: number) => `${NOTE_NAMES[((m % 12) + 12) % 12]}${Math.floor(m / 12) - 1}`;
 
-// 音阶半音集合（相对于根音 C=0..B=11）
+// 完整调式音阶库（覆盖全部常用大小调与五声音阶）
 const SCALES: Record<string, number[] | null> = {
   "Chromatic (Off)": null,
   "C Major / A Minor": [0, 2, 4, 5, 7, 9, 11],
   "G Major / E Minor": [7, 9, 11, 0, 2, 4, 6],
-  "F Major / D Minor": [5, 7, 9, 10, 0, 2, 4],
   "D Major / B Minor": [2, 4, 6, 7, 9, 11, 1],
+  "A Major / F# Minor": [9, 11, 1, 2, 4, 6, 8],
+  "E Major / C# Minor": [4, 6, 8, 9, 11, 1, 3],
+  "F Major / D Minor": [5, 7, 9, 10, 0, 2, 4],
+  "Bb Major / G Minor": [10, 0, 2, 3, 5, 7, 9],
+  "Eb Major / C Minor": [3, 5, 7, 8, 10, 0, 2],
+  "Ab Major / F Minor": [8, 10, 0, 1, 3, 5, 7],
   "A Minor Pentatonic": [9, 0, 2, 4, 7],
+  "C Major Pentatonic": [0, 2, 4, 7, 9],
 };
 
 function snapToScale(midi: number, allowed: number[] | null): number {
@@ -32,6 +38,38 @@ function snapToScale(midi: number, allowed: number[] | null): number {
     if (allowed.includes((pc + d) % 12)) return midi + d;
   }
   return midi;
+}
+
+// 根据音符时长加权直方图自动推断最匹配调式
+function detectBestScale(notes: RawNote[]): { scaleName: string; confidence: number } {
+  if (!notes.length) return { scaleName: "C Major / A Minor", confidence: 0 };
+  const weights = new Float64Array(12);
+  let totalDur = 0;
+  for (const n of notes) {
+    if (n.durSec < 0.06) continue;
+    const pc = ((n.midi % 12) + 12) % 12;
+    weights[pc] += n.durSec;
+    totalDur += n.durSec;
+  }
+  if (totalDur <= 0) return { scaleName: "C Major / A Minor", confidence: 0 };
+
+  let bestName = "C Major / A Minor";
+  let bestScore = -1;
+  const firstPc = ((notes.find((n) => n.durSec >= 0.06)?.midi ?? notes[0].midi) % 12 + 12) % 12;
+  for (const [name, pcs] of Object.entries(SCALES)) {
+    if (!pcs || name.includes("Pentatonic")) continue;
+    let inScale = 0;
+    for (const pc of pcs) inScale += weights[pc];
+    // 奖励主三和弦 (I: pcs[0], pcs[2], pcs[4])、关系小三和弦与首音命中
+    const triadWeight = weights[pcs[0]] + weights[pcs[2]] * 0.8 + weights[pcs[4]] * 0.6 + weights[pcs[5]] * 0.5;
+    const firstNoteBonus = pcs[0] === firstPc || pcs[5] === firstPc ? totalDur * 0.12 : 0;
+    const score = (inScale + triadWeight * 0.15 + firstNoteBonus) / totalDur;
+    if (score > bestScore) {
+      bestScore = score;
+      bestName = name;
+    }
+  }
+  return { scaleName: bestName, confidence: Math.min(99, Math.round(Math.min(1, bestScore) * 98)) };
 }
 
 // 归一化自相关基频检测（采用 McLeod 首峰准则避免低八度倍频跳变）
@@ -151,8 +189,9 @@ function buildMidiFile(notes: RawNote[], bpm: number): Uint8Array {
   for (const n of notes) {
     const t0 = secToTick(n.startSec);
     const t1 = Math.max(t0 + 20, secToTick(n.startSec + n.durSec));
-    evs.push({ tick: t0, bytes: [0x90, n.midi & 0x7f, n.velocity & 0x7f] });
-    evs.push({ tick: t1, bytes: [0x80, n.midi & 0x7f, 0x00] });
+    const clampedMidi = Math.max(12, Math.min(108, n.midi));
+    evs.push({ tick: t0, bytes: [0x90, clampedMidi & 0x7f, n.velocity & 0x7f] });
+    evs.push({ tick: t1, bytes: [0x80, clampedMidi & 0x7f, 0x00] });
   }
   evs.sort((a, b) => a.tick - b.tick || a.bytes[0] - b.bytes[0]);
 
@@ -218,20 +257,31 @@ function createDemoSamples(sr = 22050): { samples: Float32Array; sr: number } {
   return { samples: out, sr };
 }
 
+type SynthTimbre = "keys" | "triangle" | "pluck" | "sub";
+
 export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?: "audio" | "voice" }) {
   const [rawNotes, setRawNotes] = useState<RawNote[]>([]);
+  const [sourceAudio, setSourceAudio] = useState<{ samples: Float32Array; sr: number } | null>(null);
   const [removedIdx, setRemovedIdx] = useState<Set<number>>(new Set());
   const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState("");
   const [minDurMs, setMinDurMs] = useState(80); // 默认滤掉 <80ms 碎杂音
   const [minRms, setMinRms] = useState(0.02);
   const [scale, setScale] = useState<string>("Chromatic (Off)");
+  const [detectedKeyInfo, setDetectedKeyInfo] = useState<string>("");
+  const [octaveShift, setOctaveShift] = useState<number>(0);
   const [bpm, setBpm] = useState(120);
   const [quantize, setQuantize] = useState<"off" | "16" | "8">("off");
+  const [timbre, setTimbre] = useState<SynthTimbre>("keys");
   const [recording, setRecording] = useState(false);
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState< false | "midi" | "source">(false);
+  const [playheadSec, setPlayheadSec] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+
   const mediaRec = useRef<MediaRecorder | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const activeAudioCtx = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   // 计算清理后的音符列表
   const cleanedNotes: (RawNote & { origIdx: number })[] = rawNotes
@@ -239,7 +289,8 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     .filter((n) => !removedIdx.has(n.origIdx))
     .filter((n) => n.durSec * 1000 >= minDurMs && n.rms >= minRms)
     .map((n) => {
-      const snappedMidi = snapToScale(n.midi, SCALES[scale]);
+      const shifted = Math.max(24, Math.min(108, n.midi + octaveShift * 12));
+      const snappedMidi = snapToScale(shifted, SCALES[scale]);
       if (quantize === "off") return { ...n, midi: snappedMidi };
       const gridSec = (60 / bpm) * (quantize === "16" ? 0.25 : 0.5);
       const qStart = Math.round(n.startSec / gridSec) * gridSec;
@@ -249,10 +300,29 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
 
   const strayRemovedCount = rawNotes.length - cleanedNotes.length;
 
+  async function stopPlayback() {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (activeAudioCtx.current) {
+      try {
+        await activeAudioCtx.current.close();
+      } catch {
+        // ignore closed context
+      }
+      activeAudioCtx.current = null;
+    }
+    setPlaying(false);
+    setPlayheadSec(null);
+  }
+
   async function handleFile(file: File) {
+    await stopPlayback();
     setBusy("Decoding & extracting melody notes…");
     setFileName(file.name.replace(/\.[^.]+$/, ""));
     setRemovedIdx(new Set());
+    setDetectedKeyInfo("");
     const ctx = new AudioContext();
     const ab = await ctx.decodeAudioData(await file.arrayBuffer());
     const ch0 = ab.getChannelData(0);
@@ -266,18 +336,28 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     }
     const notes = extractRawNotes(mono, ab.sampleRate);
     await ctx.close();
+    setSourceAudio({ samples: mono, sr: ab.sampleRate });
     setRawNotes(notes);
     setBusy("");
   }
 
-  function loadDemo() {
+  async function loadDemo() {
+    await stopPlayback();
     setBusy("Synthesizing demo melody…");
     setFileName("demo-vocal-melody");
     setRemovedIdx(new Set());
+    setDetectedKeyInfo("");
     const { samples, sr } = createDemoSamples();
     const notes = extractRawNotes(samples, sr);
+    setSourceAudio({ samples, sr });
     setRawNotes(notes);
     setBusy("");
+  }
+
+  function handleAutoDetectKey() {
+    const { scaleName, confidence } = detectBestScale(rawNotes);
+    setScale(scaleName);
+    setDetectedKeyInfo(`Auto-locked: ${scaleName} (${confidence}% match)`);
   }
 
   async function toggleMic() {
@@ -304,7 +384,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     }
   }
 
-  // 绘制钢琴卷帘 (Piano Roll)
+  // 绘制钢琴卷帘 (Piano Roll) + 实时播放头
   useEffect(() => {
     const c = canvasRef.current;
     if (!c || !rawNotes.length) return;
@@ -314,9 +394,11 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, W, H);
 
-    const allMidi = cleanedNotes.length ? cleanedNotes.map((n) => n.midi) : rawNotes.map((n) => n.midi);
-    const minM = Math.max(36, Math.min(...allMidi) - 2);
-    const maxM = Math.min(96, Math.max(...allMidi) + 2);
+    const allMidi = cleanedNotes.length
+      ? cleanedNotes.map((n) => n.midi)
+      : rawNotes.map((n) => n.midi + octaveShift * 12);
+    const minM = Math.max(24, Math.min(...allMidi) - 2);
+    const maxM = Math.min(108, Math.max(...allMidi) + 2);
     const spanM = Math.max(8, maxM - minM + 1);
     const maxT = Math.max(2.5, ...rawNotes.map((n) => n.startSec + n.durSec));
     const padL = 46;
@@ -326,7 +408,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     ctx.font = "11px ui-monospace, monospace";
     for (let m = minM; m <= maxM; m++) {
       const y = H - (m - minM + 1) * rowH;
-      const isBlack = [1, 3, 6, 8, 10].includes(m % 12);
+      const isBlack = [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
       ctx.fillStyle = isBlack ? "#1e293b" : "#0f172a";
       ctx.fillRect(padL, y, W - padL, rowH);
       ctx.strokeStyle = "#334155";
@@ -338,13 +420,25 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
       ctx.fillText(midiToName(m), 6, y + rowH * 0.75);
     }
 
-    // 先画被滤掉的碎杂音（半透明虚影，直观展示清理效果）
+    // 小节拍线网格
+    const beatSec = 60 / bpm;
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.14)";
+    for (let t = 0; t <= maxT; t += beatSec) {
+      const x = padL + (t / maxT) * (W - padL - 10);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+
+    // 先画被滤掉的碎杂音（半透明红色虚影，直观展示清理效果）
     for (let i = 0; i < rawNotes.length; i++) {
       if (cleanedNotes.some((cn) => cn.origIdx === i)) continue;
       const n = rawNotes[i];
+      const m = Math.max(24, Math.min(108, n.midi + octaveShift * 12));
       const x = padL + (n.startSec / maxT) * (W - padL - 10);
       const w = Math.max(4, (n.durSec / maxT) * (W - padL - 10));
-      const y = H - (n.midi - minM + 1) * rowH + 2;
+      const y = H - (m - minM + 1) * rowH + 2;
       ctx.fillStyle = "rgba(239, 68, 68, 0.28)";
       ctx.fillRect(x, y, w, Math.max(4, rowH - 4));
     }
@@ -354,12 +448,26 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
       const x = padL + (n.startSec / maxT) * (W - padL - 10);
       const w = Math.max(6, (n.durSec / maxT) * (W - padL - 10));
       const y = H - (n.midi - minM + 1) * rowH + 2;
-      ctx.fillStyle = "#22c55e";
+      const isPlayingNow =
+        playheadSec !== null && playheadSec >= n.startSec && playheadSec <= n.startSec + n.durSec;
+      ctx.fillStyle = isPlayingNow ? "#38bdf8" : "#22c55e";
       ctx.fillRect(x, y, w, Math.max(6, rowH - 4));
       ctx.fillStyle = "#052e16";
       if (w > 24) ctx.fillText(midiToName(n.midi), x + 4, y + rowH * 0.72);
     }
-  }, [rawNotes, cleanedNotes]);
+
+    // 实时播放指针线
+    if (playheadSec !== null) {
+      const px = padL + (playheadSec / maxT) * (W - padL - 10);
+      ctx.strokeStyle = "#facc15";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, H);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+  }, [rawNotes, cleanedNotes, octaveShift, bpm, playheadSec]);
 
   // 点击钢琴卷帘上的音符可手动删除
   function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -369,8 +477,8 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     const px = ((e.clientX - r.left) / r.width) * c.width;
     const py = ((e.clientY - r.top) / r.height) * c.height;
     const allMidi = cleanedNotes.map((n) => n.midi);
-    const minM = Math.max(36, Math.min(...allMidi) - 2);
-    const maxM = Math.min(96, Math.max(...allMidi) + 2);
+    const minM = Math.max(24, Math.min(...allMidi) - 2);
+    const maxM = Math.min(108, Math.max(...allMidi) + 2);
     const spanM = Math.max(8, maxM - minM + 1);
     const maxT = Math.max(2.5, ...rawNotes.map((n) => n.startSec + n.durSec));
     const padL = 46;
@@ -387,30 +495,99 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     }
   }
 
-  // 用 WebAudio 合成器试听当前清理后的 MIDI 音符
+  // 用 WebAudio 合成器试听当前清理后的 MIDI 音符（带播放头动画与多音色）
   async function playPreview() {
-    if (playing || !cleanedNotes.length) return;
-    setPlaying(true);
+    if (playing === "midi") {
+      await stopPlayback();
+      return;
+    }
+    await stopPlayback();
+    if (!cleanedNotes.length) return;
+    setPlaying("midi");
     const ctx = new AudioContext();
-    const t0 = ctx.currentTime + 0.05;
+    activeAudioCtx.current = ctx;
+    const t0 = ctx.currentTime + 0.04;
     let endSec = 0;
+
     for (const n of cleanedNotes) {
+      const freq = 440 * Math.pow(2, (n.midi - 69) / 12);
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.value = 440 * Math.pow(2, (n.midi - 69) / 12);
+
+      if (timbre === "keys") {
+        osc.type = "triangle";
+        const osc2 = ctx.createOscillator();
+        osc2.type = "sine";
+        osc2.frequency.value = freq * 2;
+        const g2 = ctx.createGain();
+        g2.gain.value = 0.18;
+        osc2.connect(g2).connect(gain);
+        osc2.start(t0 + n.startSec);
+        osc2.stop(t0 + n.startSec + n.durSec + 0.04);
+      } else if (timbre === "pluck") {
+        osc.type = "sawtooth";
+      } else if (timbre === "sub") {
+        osc.type = "sine";
+      } else {
+        osc.type = "triangle";
+      }
+
+      osc.frequency.value = freq;
+      const peakGain = timbre === "pluck" ? 0.16 : 0.24;
+      const decayEnd = timbre === "pluck" ? Math.min(n.durSec, 0.22) : n.durSec;
       gain.gain.setValueAtTime(0.001, t0 + n.startSec);
-      gain.gain.linearRampToValueAtTime(0.22, t0 + n.startSec + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.001, t0 + n.startSec + n.durSec);
+      gain.gain.linearRampToValueAtTime(peakGain, t0 + n.startSec + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + n.startSec + decayEnd);
       osc.connect(gain).connect(ctx.destination);
       osc.start(t0 + n.startSec);
-      osc.stop(t0 + n.startSec + n.durSec + 0.02);
+      osc.stop(t0 + n.startSec + n.durSec + 0.03);
       endSec = Math.max(endSec, n.startSec + n.durSec);
     }
-    setTimeout(async () => {
-      await ctx.close();
-      setPlaying(false);
-    }, (endSec + 0.15) * 1000);
+
+    const tick = () => {
+      if (!activeAudioCtx.current) return;
+      const elapsed = activeAudioCtx.current.currentTime - t0;
+      if (elapsed <= endSec + 0.05) {
+        setPlayheadSec(Math.max(0, elapsed));
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        stopPlayback();
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }
+
+  // 播放原始音频用于 A/B 对比
+  async function playOriginalAudio() {
+    if (playing === "source") {
+      await stopPlayback();
+      return;
+    }
+    await stopPlayback();
+    if (!sourceAudio) return;
+    setPlaying("source");
+    const ctx = new AudioContext();
+    activeAudioCtx.current = ctx;
+    const buf = ctx.createBuffer(1, sourceAudio.samples.length, sourceAudio.sr);
+    buf.getChannelData(0).set(sourceAudio.samples);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    const t0 = ctx.currentTime + 0.02;
+    const dur = sourceAudio.samples.length / sourceAudio.sr;
+    src.start(t0);
+
+    const tick = () => {
+      if (!activeAudioCtx.current) return;
+      const elapsed = activeAudioCtx.current.currentTime - t0;
+      if (elapsed <= dur) {
+        setPlayheadSec(Math.max(0, elapsed));
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        stopPlayback();
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
   }
 
   function downloadMidi() {
@@ -422,6 +599,13 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     a.download = `${fileName || "melody"}.mid`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function copyNoteNames() {
+    const text = cleanedNotes.map((n) => midiToName(n.midi)).join(" ");
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
   }
 
   return (
@@ -445,10 +629,13 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
             />
             <span className="text-4xl">🎹</span>
             <span className="text-lg font-semibold">
-              {busy || (defaultMode === "voice" ? "Drop a voice/hummed recording or MP3/WAV file" : "Drop an MP3, WAV or voice recording here")}
+              {busy ||
+                (defaultMode === "voice"
+                  ? "Drop a voice/hummed recording or MP3/WAV file"
+                  : "Drop an MP3, WAV, M4A, FLAC or voice recording here")}
             </span>
             <span className="text-sm text-slate-500">
-              100% private in-browser conversion · Built-in stray-note cleaner &amp; scale lock
+              100% private in-browser conversion · McLeod pitch tracker · Stray-note cleaner &amp; Auto Key Lock
             </span>
           </label>
 
@@ -473,10 +660,12 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {/* 碎音清理与量化控制栏 */}
-          <div className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* 碎音清理、自动调式识别与量化控制栏 */}
+          <div className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-              <span>Min Note Length (Stray Filter): <b>{minDurMs} ms</b></span>
+              <span>
+                Min Note Length (Stray Filter): <b>{minDurMs} ms</b>
+              </span>
               <input
                 type="range"
                 aria-label="Min Note Length"
@@ -487,8 +676,11 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
                 onChange={(e) => setMinDurMs(Number(e.target.value))}
               />
             </label>
+
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-              <span>Noise Gate (RMS): <b>{minRms.toFixed(3)}</b></span>
+              <span>
+                Noise Gate (RMS): <b>{minRms.toFixed(3)}</b>
+              </span>
               <input
                 type="range"
                 aria-label="Noise Gate"
@@ -499,8 +691,18 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
                 onChange={(e) => setMinRms(Number(e.target.value))}
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-              <span>Scale Lock (Snap Pitch)</span>
+
+            <div className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+              <div className="flex items-center justify-between">
+                <span>Scale Lock (Snap Pitch)</span>
+                <button
+                  type="button"
+                  onClick={handleAutoDetectKey}
+                  className="rounded bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-200"
+                >
+                  ✨ Auto-Detect Key
+                </button>
+              </div>
               <select
                 aria-label="Scale Lock"
                 className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
@@ -508,11 +710,48 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
                 onChange={(e) => setScale(e.target.value)}
               >
                 {Object.keys(SCALES).map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
                 ))}
               </select>
-            </label>
+              {detectedKeyInfo && <span className="text-[11px] text-indigo-600">{detectedKeyInfo}</span>}
+            </div>
+
             <div className="flex gap-2">
+              <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-700">
+                <span>Octave Shift</span>
+                <select
+                  aria-label="Octave Shift"
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
+                  value={octaveShift}
+                  onChange={(e) => setOctaveShift(Number(e.target.value))}
+                >
+                  <option value={-2}>-2 Oct (Bass)</option>
+                  <option value={-1}>-1 Oct</option>
+                  <option value={0}>0 (Original)</option>
+                  <option value={1}>+1 Oct (Lead)</option>
+                  <option value={2}>+2 Oct</option>
+                </select>
+              </label>
+
+              <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-700">
+                <span>Preview Synth</span>
+                <select
+                  aria-label="Preview Synth"
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
+                  value={timbre}
+                  onChange={(e) => setTimbre(e.target.value as SynthTimbre)}
+                >
+                  <option value="keys">Warm Keys</option>
+                  <option value="triangle">Triangle Lead</option>
+                  <option value="pluck">Pluck Synth</option>
+                  <option value="sub">Sub Sine</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="flex gap-2 sm:col-span-2 lg:col-span-2">
               <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-700">
                 <span>BPM</span>
                 <input
@@ -526,16 +765,16 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
                 />
               </label>
               <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-700">
-                <span>Grid Snap</span>
+                <span>Grid Snap (Quantize)</span>
                 <select
                   aria-label="Grid Snap"
                   className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                   value={quantize}
                   onChange={(e) => setQuantize(e.target.value as "off" | "16" | "8")}
                 >
-                  <option value="off">Off</option>
-                  <option value="16">1/16 note</option>
-                  <option value="8">1/8 note</option>
+                  <option value="off">Off (Natural Timing)</option>
+                  <option value="16">1/16 note grid</option>
+                  <option value="8">1/8 note grid</option>
                 </select>
               </label>
             </div>
@@ -546,23 +785,52 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
             <div className="text-sm text-slate-600" data-testid="note-stats">
               Clean notes: <b className="text-emerald-700">{cleanedNotes.length}</b> · Stray notes filtered:{" "}
               <b className="text-rose-600">{strayRemovedCount}</b>{" "}
-              <span className="text-xs text-slate-400">(click any green note on the piano roll to delete it)</span>
+              {removedIdx.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setRemovedIdx(new Set())}
+                  className="ml-2 text-xs font-medium text-indigo-600 underline hover:text-indigo-800"
+                >
+                  Undo {removedIdx.size} manual delete{removedIdx.size > 1 ? "s" : ""}
+                </button>
+              )}
+              <span className="ml-1 text-xs text-slate-400">(click any green note to delete it)</span>
             </div>
+
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setRawNotes([])}
+                onClick={ async () => {
+                  await stopPlayback();
+                  setRawNotes([]);
+                }}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
               >
                 New Audio
               </button>
               <button
                 type="button"
+                onClick={playOriginalAudio}
+                disabled={!sourceAudio}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                {playing === "source" ? "⏹ Stop Original" : "🎧 Play Original Audio"}
+              </button>
+              <button
+                type="button"
                 onClick={playPreview}
-                disabled={playing || !cleanedNotes.length}
+                disabled={!cleanedNotes.length}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
               >
-                {playing ? "🔊 Playing…" : "▶ Play MIDI Preview"}
+                {playing === "midi" ? "⏹ Stop Preview" : "▶ Play MIDI Preview"}
+              </button>
+              <button
+                type="button"
+                onClick={copyNoteNames}
+                disabled={!cleanedNotes.length}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+              >
+                {copied ? "✓ Copied Notes" : "📋 Copy Notes"}
               </button>
               <button
                 type="button"
@@ -591,7 +859,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
                 key={idx}
                 onClick={() => setRemovedIdx((prev) => new Set(prev).add(n.origIdx))}
                 title="Click to remove note"
-                className="cursor-pointer rounded bg-emerald-50 px-2 py-1 font-mono text-emerald-800 border border-emerald-200 hover:bg-rose-50 hover:text-rose-700"
+                className="cursor-pointer rounded border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-emerald-800 hover:bg-rose-50 hover:text-rose-700"
               >
                 {midiToName(n.midi)} ({Math.round(n.durSec * 1000)}ms)
               </span>

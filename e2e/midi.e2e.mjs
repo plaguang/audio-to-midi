@@ -22,6 +22,10 @@ const assert = (cond, msg) => {
   const h1 = await page.locator('h1').textContent();
   assert(h1 && h1.includes('Audio to MIDI Converter'), `H1 rendered: "${h1?.trim()}"`);
 
+  // Verify sticky top navbar has all 6 links
+  const navCount = await page.locator('header nav a').count();
+  assert(navCount === 6, `Sticky top navbar renders all 6 tool links (got: ${navCount})`);
+
   // Load Demo Melody (with stray notes)
   await page.getByRole('button', { name: /Load Demo Melody/i }).click();
   await page.waitForSelector('[data-testid="note-stats"]', { timeout: 10000 });
@@ -29,6 +33,17 @@ const assert = (cond, msg) => {
   const stats80 = await page.getByTestId('note-stats').textContent();
   assert(stats80?.includes('Clean notes: 5') && stats80?.includes('Stray notes filtered: 2'),
     `Default 80ms filter keeps 5 clean notes & removes 2 stray notes (got: "${stats80?.trim()}")`);
+
+  // Test 1-Click Auto-Detect Key
+  await page.getByRole('button', { name: /Auto-Detect Key/i }).click();
+  const selectedScale = await page.getByLabel('Scale Lock').inputValue();
+  assert(selectedScale === 'C Major / A Minor', `Auto-Detect Key locked C-E-G-A-G melody to "${selectedScale}"`);
+
+  // Test Octave Shift (+1 Oct -> C4 becomes C5)
+  await page.getByLabel('Octave Shift').selectOption('1');
+  const firstChipShifted = await page.locator('span[title="Click to remove note"]').first().textContent();
+  assert(firstChipShifted?.startsWith('C5'), `Octave Shift +1 shifted C4 to C5 (got: "${firstChipShifted}")`);
+  await page.getByLabel('Octave Shift').selectOption('0');
 
   // Lower Min Note Length slider to 20ms -> should show 7 clean notes (0 stray)
   const slider = page.getByLabel('Min Note Length');
@@ -44,10 +59,14 @@ const assert = (cond, msg) => {
   const statsRestored = await page.getByTestId('note-stats').textContent();
   assert(statsRestored?.includes('Clean notes: 5'), `Restoring 80ms filter returns to 5 clean notes`);
 
-  // Click a note chip to delete 1 note -> 4 clean notes
+  // Click a note chip to delete 1 note -> 4 clean notes, then test Undo button -> back to 5
   await page.locator('span[title="Click to remove note"]').first().click();
   const statsAfterDel = await page.getByTestId('note-stats').textContent();
   assert(statsAfterDel?.includes('Clean notes: 4'), `Clicking a note removes it -> 4 clean notes remain`);
+
+  await page.getByRole('button', { name: /Undo 1 manual delete/i }).click();
+  const statsAfterUndo = await page.getByTestId('note-stats').textContent();
+  assert(statsAfterUndo?.includes('Clean notes: 5'), `Undo manual delete restores all 5 clean notes`);
 
   // Export .mid and verify SMF binary header ("MThd" + "MTrk")
   const [download] = await Promise.all([
@@ -66,11 +85,17 @@ const assert = (cond, msg) => {
   const smH1 = await page.locator('h1').textContent();
   assert(smH1 && smH1.includes('Stereo to Mono Converter'), `Stereo-to-Mono H1 rendered: "${smH1?.trim()}"`);
 
+  // Verify context-specific feature card is shown
+  const bodyText = await page.locator('main').textContent();
+  assert(bodyText?.includes('Phase Correlation Meter'), `Context-specific Stereo-to-Mono feature cards rendered`);
+
   await page.getByRole('button', { name: /Load Demo Stereo Sample/i }).click();
   await page.waitForSelector('[data-testid="phase-meter"]', { timeout: 10000 });
   const phaseText = await page.getByTestId('phase-meter').textContent();
   assert(phaseText && phaseText.includes('Phase Correlation:'), `Phase correlation calculated ("${phaseText?.trim()}")`);
 
+  // Toggle Normalize Mono Peak (-1.0 dBFS) and switch to Left Channel Only (L)
+  await page.getByText('Normalize Mono Peak (-1.0 dBFS)').click();
   await page.getByText('Left Channel Only (L)').click();
 
   const [wavDownload] = await Promise.all([
@@ -83,7 +108,7 @@ const assert = (cond, msg) => {
   const wave = wavBuf.subarray(8, 12).toString('ascii');
   const numChannels = wavBuf.readUInt16LE(22);
   assert(riff === 'RIFF' && wave === 'WAVE' && numChannels === 1,
-    `Valid 1-channel Mono WAV exported (${wavBuf.length} bytes, channels=${numChannels})`);
+    `Valid normalized 1-channel Mono WAV exported (${wavBuf.length} bytes, channels=${numChannels})`);
 
   console.log('3. Testing All Remaining SEO Cluster Routes & Sitemap');
   for (const route of ['/voice-to-midi', '/hum-to-midi', '/mp3-to-midi', '/wav-to-midi', '/sitemap.xml', '/robots.txt']) {
@@ -94,5 +119,5 @@ const assert = (cond, msg) => {
   assert(consoleErrors.length === 0, `Zero console/page errors (${consoleErrors.length})`);
 
   await browser.close();
-  console.log('\nALL AUDIO-TO-MIDI E2E CHECKS PASSED!');
+  console.log('\nALL 21 AUDIO-TO-MIDI E2E CHECKS PASSED!');
 })();
