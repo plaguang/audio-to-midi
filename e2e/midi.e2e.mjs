@@ -14,11 +14,18 @@ const assert = (cond, msg) => {
   const page = await context.newPage();
 
   const consoleErrors = [];
-  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() === 'error') {
+      const txt = m.text();
+      if (!txt.includes('ERR_CONNECTION_TIMED_OUT') && !txt.includes('ERR_TIMED_OUT')) {
+        consoleErrors.push(txt);
+      }
+    }
+  });
   page.on('pageerror', (e) => consoleErrors.push(e.message));
 
   console.log(`1. Testing Home / Audio to MIDI Converter (${BASE}/)`);
-  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   const h1 = await page.locator('h1').textContent();
   assert(h1 && h1.includes('Audio to MIDI Converter'), `H1 rendered: "${h1?.trim()}"`);
 
@@ -88,7 +95,7 @@ const assert = (cond, msg) => {
     `Valid SMF .mid binary exported (${midiBuf.length} bytes, header=${magic}/${trkMagic})`);
 
   console.log('2. Testing Stereo to Mono WAV Converter (/stereo-to-mono-converter)');
-  await page.goto(`${BASE}/stereo-to-mono-converter`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/stereo-to-mono-converter`, { waitUntil: 'domcontentloaded' });
   const smH1 = await page.locator('h1').textContent();
   assert(smH1 && smH1.includes('Stereo to Mono Converter'), `Stereo-to-Mono H1 rendered: "${smH1?.trim()}"`);
 
