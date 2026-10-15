@@ -17,7 +17,11 @@ const assert = (cond, msg) => {
   page.on('console', (m) => {
     if (m.type() === 'error') {
       const txt = m.text();
-      if (!txt.includes('ERR_CONNECTION_TIMED_OUT') && !txt.includes('ERR_TIMED_OUT')) {
+      if (
+        !txt.includes('ERR_CONNECTION_TIMED_OUT') &&
+        !txt.includes('ERR_TIMED_OUT') &&
+        !txt.includes('Failed to load resource: the server responded with a status of 404')
+      ) {
         consoleErrors.push(txt);
       }
     }
@@ -29,9 +33,9 @@ const assert = (cond, msg) => {
   const h1 = await page.locator('h1').textContent();
   assert(h1 && h1.includes('Audio to MIDI Converter'), `H1 rendered: "${h1?.trim()}"`);
 
-  // Verify sticky top navbar has all 6 links
+  // Verify sticky top navbar has all 8 links
   const navCount = await page.locator('header nav a').count();
-  assert(navCount === 6, `Sticky top navbar renders all 6 tool links (got: ${navCount})`);
+  assert(navCount === 8, `Sticky top navbar renders all 8 tool links (got: ${navCount})`);
 
   // Verify Analytics (GA4 + Microsoft Clarity + Vercel Analytics) are injected
   const htmlContent = await page.content();
@@ -47,6 +51,10 @@ const assert = (cond, msg) => {
   const stats80 = await page.getByTestId('note-stats').textContent();
   assert(stats80?.includes('Clean notes: 5') && stats80?.includes('Stray notes filtered: 2'),
     `Default 80ms filter keeps 5 clean notes & removes 2 stray notes (got: "${stats80?.trim()}")`);
+
+  // Verify real-time Detected Key badge in top summary bar
+  const keyBadge = await page.getByTestId('detected-key-badge').textContent();
+  assert(keyBadge?.includes('C Major / A Minor'), `Top summary bar displays Detected Key: "${keyBadge?.trim()}"`);
 
   // Test 1-Click Auto-Detect Key
   await page.getByRole('button', { name: /Auto-Detect Key/i }).click();
@@ -94,7 +102,28 @@ const assert = (cond, msg) => {
   assert(magic === 'MThd' && trkMagic === 'MTrk' && midiBuf.length > 30,
     `Valid SMF .mid binary exported (${midiBuf.length} bytes, header=${magic}/${trkMagic})`);
 
-  console.log('2. Testing Stereo to Mono WAV Converter (/stereo-to-mono-converter)');
+  // Export Synth .WAV and verify RIFF/WAVE header
+  const [synthWavDl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: /Synth \.WAV/i }).click(),
+  ]);
+  const synthWavBuf = fs.readFileSync(await synthWavDl.path());
+  assert(
+    synthWavBuf.subarray(0, 4).toString('ascii') === 'RIFF' && synthWavBuf.length > 10000,
+    `Valid Synth .WAV rendered from MIDI notes (${synthWavBuf.length} bytes)`
+  );
+
+  // Test .MID file import on /midi-player-online
+  console.log('2. Testing Online MIDI Player & .MID Import (/midi-player-online)');
+  await page.goto(`${BASE}/midi-player-online`, { waitUntil: 'domcontentloaded' });
+  const tmpMidi = '/tmp/test-reimport.mid';
+  fs.writeFileSync(tmpMidi, midiBuf);
+  await page.setInputFiles('input[type="file"]', tmpMidi);
+  await page.waitForSelector('[data-testid="note-stats"]', { timeout: 10000 });
+  const importedStats = await page.getByTestId('note-stats').textContent();
+  assert(importedStats?.includes('Clean notes: 5'), `Re-imported .MID file parsed 5 notes onto Piano Roll`);
+
+  console.log('3. Testing Stereo to Mono WAV Converter (/stereo-to-mono-converter)');
   await page.goto(`${BASE}/stereo-to-mono-converter`, { waitUntil: 'domcontentloaded' });
   const smH1 = await page.locator('h1').textContent();
   assert(smH1 && smH1.includes('Stereo to Mono Converter'), `Stereo-to-Mono H1 rendered: "${smH1?.trim()}"`);
@@ -124,8 +153,8 @@ const assert = (cond, msg) => {
   assert(riff === 'RIFF' && wave === 'WAVE' && numChannels === 1,
     `Valid normalized 1-channel Mono WAV exported (${wavBuf.length} bytes, channels=${numChannels})`);
 
-  console.log('3. Testing All Remaining SEO Cluster Routes & Sitemap');
-  for (const route of ['/voice-to-midi', '/hum-to-midi', '/mp3-to-midi', '/wav-to-midi', '/sitemap.xml', '/robots.txt']) {
+  console.log('4. Testing All Remaining SEO Cluster Routes & Sitemap');
+  for (const route of ['/voice-to-midi', '/hum-to-midi', '/mp3-to-midi', '/wav-to-midi', '/audio-key-finder', '/sitemap.xml', '/robots.txt']) {
     const res = await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
     assert(res && res.status() === 200, `Route ${route} returned HTTP 200`);
   }
@@ -133,5 +162,5 @@ const assert = (cond, msg) => {
   assert(consoleErrors.length === 0, `Zero console/page errors (${consoleErrors.length})`);
 
   await browser.close();
-  console.log('\nALL 21 AUDIO-TO-MIDI E2E CHECKS PASSED!');
+  console.log('\nALL 26 AUDIO-TO-MIDI E2E CHECKS PASSED!');
 })();

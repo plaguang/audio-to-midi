@@ -56,7 +56,7 @@ function detectBestScale(notes: RawNote[]): { scaleName: string; confidence: num
 
   let bestName = "C Major / A Minor";
   let bestScore = -1;
-  const firstPc = ((notes.find((n) => n.durSec >= 0.06)?.midi ?? notes[0].midi) % 12 + 12) % 12;
+  const firstPc = (((notes.find((n) => n.durSec >= 0.06)?.midi ?? notes[0].midi) % 12) + 12) % 12;
   for (const [name, pcs] of Object.entries(SCALES)) {
     if (!pcs || name.includes("Pentatonic")) continue;
     let inScale = 0;
@@ -71,6 +71,120 @@ function detectBestScale(notes: RawNote[]): { scaleName: string; confidence: num
     }
   }
   return { scaleName: bestName, confidence: Math.min(99, Math.round(Math.min(1, bestScore) * 98)) };
+}
+
+// 根据音符起始间隔 (IOI) 估算旋律 BPM
+function estimateBpmFromNotes(notes: RawNote[]): number {
+  const valid = notes.filter((n) => n.durSec >= 0.08);
+  if (valid.length < 3) return 120;
+  const iois: number[] = [];
+  for (let i = 1; i < valid.length; i++) {
+    const dt = valid[i].startSec - valid[i - 1].startSec;
+    if (dt >= 0.18 && dt <= 1.2) iois.push(dt);
+  }
+  if (!iois.length) return 120;
+  iois.sort((a, b) => a - b);
+  const medianIoi = iois[Math.floor(iois.length / 2)];
+  let bpm = Math.round(60 / medianIoi);
+  while (bpm < 72) bpm *= 2;
+  while (bpm > 175) bpm = Math.round(bpm / 2);
+  return Math.max(60, Math.min(200, bpm));
+}
+
+// 解析标准 .MID / .MIDI 二进制文件（支持 Format 0 / 1）
+function parseMidiFile(buf: ArrayBuffer): { notes: RawNote[]; bpm: number } {
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  if (u8.length < 14 || String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== "MThd") {
+    throw new Error("Invalid MIDI file header");
+  }
+  const numTracks = dv.getUint16(10, false);
+  const division = dv.getUint16(12, false) || 480;
+  let pos = 8 + dv.getUint32(4, false);
+  let bpm = 120;
+  let usPerBeat = 500_000;
+  const outNotes: RawNote[] = [];
+
+  for (let t = 0; t < numTracks && pos + 8 <= u8.length; t++) {
+    const chunkId = String.fromCharCode(u8[pos], u8[pos + 1], u8[pos + 2], u8[pos + 3]);
+    const chunkLen = dv.getUint32(pos + 4, false);
+    pos += 8;
+    const end = Math.min(u8.length, pos + chunkLen);
+    if (chunkId !== "MTrk") {
+      pos = end;
+      continue;
+    }
+
+    let tick = 0;
+    let runningStatus = 0;
+    const active = new Map<number, { tick: number; vel: number }>();
+
+    const readVlq = () => {
+      let val = 0;
+      while (pos < end) {
+        const b = u8[pos++];
+        val = (val << 7) | (b & 0x7f);
+        if ((b & 0x80) === 0) break;
+      }
+      return val;
+    };
+
+    while (pos < end) {
+      tick += readVlq();
+      if (pos >= end) break;
+      let status = u8[pos];
+      if (status < 0x80) {
+        status = runningStatus;
+      } else {
+        pos++;
+        if (status < 0xf0) runningStatus = status;
+      }
+
+      const type = status & 0xf0;
+      if (type === 0x90 || type === 0x80) {
+        const note = u8[pos++];
+        const vel = u8[pos++];
+        if (type === 0x90 && vel > 0) {
+          active.set(note, { tick, vel });
+        } else {
+          const st = active.get(note);
+          if (st) {
+            const startSec = (st.tick / division) * (usPerBeat / 1_000_000);
+            const durSec = Math.max(0.03, ((tick - st.tick) / division) * (usPerBeat / 1_000_000));
+            outNotes.push({
+              midi: note,
+              startSec,
+              durSec,
+              velocity: st.vel,
+              rms: Math.max(0.04, st.vel / 420),
+            });
+            active.delete(note);
+          }
+        }
+      } else if (type === 0xa0 || type === 0xb0 || type === 0xe0) {
+        pos += 2;
+      } else if (type === 0xc0 || type === 0xd0) {
+        pos += 1;
+      } else if (status === 0xff) {
+        const metaType = u8[pos++];
+        const len = readVlq();
+        if (metaType === 0x51 && len === 3 && pos + 3 <= end) {
+          usPerBeat = (u8[pos] << 16) | (u8[pos + 1] << 8) | u8[pos + 2];
+          bpm = Math.max(40, Math.min(240, Math.round(60_000_000 / usPerBeat)));
+        }
+        pos += len;
+      } else if (status === 0xf0 || status === 0xf7) {
+        const len = readVlq();
+        pos += len;
+      } else {
+        break;
+      }
+    }
+    pos = end;
+  }
+
+  outNotes.sort((a, b) => a.startSec - b.startSec || a.midi - b.midi);
+  return { notes: outNotes, bpm };
 }
 
 // 归一化自相关基频检测（采用 McLeod 首峰准则避免低八度倍频跳变）
@@ -226,6 +340,66 @@ function buildMidiFile(notes: RawNote[], bpm: number): Uint8Array {
   return new Uint8Array(header);
 }
 
+type SynthTimbre = "keys" | "triangle" | "pluck" | "sub";
+
+// 将清理后的 MIDI 音符渲染为 16-bit 单声道 WAV 文件，方便无 DAW 用户直接下载音频
+function renderNotesToWav(notes: RawNote[], timbre: SynthTimbre, sr = 22050): Uint8Array {
+  const maxEnd = notes.reduce((m, n) => Math.max(m, n.startSec + n.durSec), 1.0) + 0.25;
+  const numSamples = Math.ceil(maxEnd * sr);
+  const pcm = new Float32Array(numSamples);
+
+  for (const n of notes) {
+    const freq = 440 * Math.pow(2, (n.midi - 69) / 12);
+    const i0 = Math.max(0, Math.floor(n.startSec * sr));
+    const i1 = Math.min(numSamples, Math.ceil((n.startSec + n.durSec) * sr));
+    for (let i = i0; i < i1; i++) {
+      const t = (i - i0) / sr;
+      const attack = Math.min(1, t / 0.01);
+      const decay =
+        timbre === "pluck"
+          ? Math.exp(-t * 10)
+          : Math.min(1, Math.max(0, (n.durSec - t) / 0.025));
+      const env = 0.28 * attack * decay;
+      let wave = Math.sin(2 * Math.PI * freq * t);
+      if (timbre === "keys") {
+        wave = 0.75 * wave + 0.2 * Math.sin(4 * Math.PI * freq * t) + 0.05 * Math.sin(6 * Math.PI * freq * t);
+      } else if (timbre === "pluck") {
+        wave = 0.6 * wave + 0.3 * Math.sin(4 * Math.PI * freq * t) + 0.15 * Math.sin(8 * Math.PI * freq * t);
+      } else if (timbre === "triangle") {
+        wave = (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * freq * t));
+      }
+      pcm[i] += env * wave;
+    }
+  }
+
+  const buf = new ArrayBuffer(44 + numSamples * 2);
+  const v = new DataView(buf);
+  const wStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i));
+  };
+  wStr(0, "RIFF");
+  v.setUint32(4, 36 + numSamples * 2, true);
+  wStr(8, "WAVE");
+  wStr(12, "fmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true);
+  v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  wStr(36, "data");
+  v.setUint32(40, numSamples * 2, true);
+
+  let p = 44;
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    v.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    p += 2;
+  }
+  return new Uint8Array(buf);
+}
+
 // 合成一段带细微碎音的旋律采样（供用户一键体验与自动化测试）
 function createDemoSamples(sr = 22050): { samples: Float32Array; sr: number } {
   // C4 - E4 - G4 - A4 - G4 + 两个 ~36ms 碎杂音（用来演示 Min Note Length 滤除效果）
@@ -258,8 +432,6 @@ function createDemoSamples(sr = 22050): { samples: Float32Array; sr: number } {
   return { samples: out, sr };
 }
 
-type SynthTimbre = "keys" | "triangle" | "pluck" | "sub";
-
 export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?: "audio" | "voice" }) {
   const [rawNotes, setRawNotes] = useState<RawNote[]>([]);
   const [sourceAudio, setSourceAudio] = useState<{ samples: Float32Array; sr: number } | null>(null);
@@ -275,7 +447,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
   const [quantize, setQuantize] = useState<"off" | "16" | "8">("off");
   const [timbre, setTimbre] = useState<SynthTimbre>("keys");
   const [recording, setRecording] = useState(false);
-  const [playing, setPlaying] = useState< false | "midi" | "source">(false);
+  const [playing, setPlaying] = useState<false | "midi" | "source">(false);
   const [playheadSec, setPlayheadSec] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -300,6 +472,13 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     });
 
   const strayRemovedCount = rawNotes.length - cleanedNotes.length;
+  const bestKeyEst = rawNotes.length ? detectBestScale(rawNotes) : null;
+  const pitchRangeText =
+    cleanedNotes.length > 0
+      ? `${midiToName(Math.min(...cleanedNotes.map((n) => n.midi)))} – ${midiToName(
+          Math.max(...cleanedNotes.map((n) => n.midi))
+        )}`
+      : "—";
 
   async function stopPlayback() {
     if (rafRef.current) {
@@ -320,10 +499,28 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
 
   async function handleFile(file: File) {
     await stopPlayback();
-    setBusy("Decoding & extracting melody notes…");
     setFileName(file.name.replace(/\.[^.]+$/, ""));
     setRemovedIdx(new Set());
     setDetectedKeyInfo("");
+
+    // 支持直接拖入 .mid / .midi 文件进行在线可视化播放与编辑
+    if (/\.midi?$/i.test(file.name) || file.type.includes("midi")) {
+      setBusy("Parsing MIDI file…");
+      try {
+        const parsed = parseMidiFile(await file.arrayBuffer());
+        setSourceAudio(null);
+        setRawNotes(parsed.notes);
+        setBpm(parsed.bpm);
+        setBusy("");
+        trackToolEvent("midi_file_upload", { rawNotes: parsed.notes.length, bpm: parsed.bpm });
+      } catch {
+        setBusy("");
+        alert("Could not parse .MID file. Please try another MIDI or audio file.");
+      }
+      return;
+    }
+
+    setBusy("Decoding & extracting melody notes…");
     const ctx = new AudioContext();
     const ab = await ctx.decodeAudioData(await file.arrayBuffer());
     const ch0 = ab.getChannelData(0);
@@ -339,6 +536,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     await ctx.close();
     setSourceAudio({ samples: mono, sr: ab.sampleRate });
     setRawNotes(notes);
+    setBpm(estimateBpmFromNotes(notes));
     setBusy("");
     trackToolEvent("audio_upload", { rawNotes: notes.length });
   }
@@ -353,6 +551,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     const notes = extractRawNotes(samples, sr);
     setSourceAudio({ samples, sr });
     setRawNotes(notes);
+    setBpm(estimateBpmFromNotes(notes));
     setBusy("");
     trackToolEvent("demo_melody_load", { rawNotes: notes.length });
   }
@@ -510,6 +709,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     await stopPlayback();
     if (!cleanedNotes.length) return;
     setPlaying("midi");
+    trackToolEvent("play_midi_preview", { notes: cleanedNotes.length, timbre });
     const ctx = new AudioContext();
     activeAudioCtx.current = ctx;
     const t0 = ctx.currentTime + 0.04;
@@ -572,6 +772,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     await stopPlayback();
     if (!sourceAudio) return;
     setPlaying("source");
+    trackToolEvent("play_original_audio");
     const ctx = new AudioContext();
     activeAudioCtx.current = ctx;
     const buf = ctx.createBuffer(1, sourceAudio.samples.length, sourceAudio.sr);
@@ -608,6 +809,18 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     trackToolEvent("download_midi", { notes: cleanedNotes.length, scale, bpm });
   }
 
+  function downloadSynthWav() {
+    const bytes = renderNotesToWav(cleanedNotes, timbre);
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/wav" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${fileName || "melody"}-${timbre}.wav`;
+    a.click();
+    URL.revokeObjectURL(url);
+    trackToolEvent("download_synth_wav", { notes: cleanedNotes.length, timbre });
+  }
+
   async function copyNoteNames() {
     const text = cleanedNotes.map((n) => midiToName(n.midi)).join(" ");
     await navigator.clipboard.writeText(text);
@@ -631,7 +844,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
           >
             <input
               type="file"
-              accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.webm"
+              accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.webm,.mid,.midi"
               className="hidden"
               onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             />
@@ -639,11 +852,11 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
             <span className="text-lg font-semibold">
               {busy ||
                 (defaultMode === "voice"
-                  ? "Drop a voice/hummed recording or MP3/WAV file"
-                  : "Drop an MP3, WAV, M4A, FLAC or voice recording here")}
+                  ? "Drop a voice/hummed recording, MP3/WAV or .MID file"
+                  : "Drop an MP3, WAV, M4A, FLAC, voice recording or .MID file here")}
             </span>
             <span className="text-sm text-slate-500">
-              100% private in-browser conversion · McLeod pitch tracker · Stray-note cleaner &amp; Auto Key Lock
+              100% private in-browser conversion · McLeod pitch tracker · Stray-note cleaner, Key/BPM detector &amp; Synth WAV export
             </span>
           </label>
 
@@ -668,6 +881,28 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* 实时音乐特征检测概览栏（调式、BPM、音域、清洁音符数） */}
+          <div className="grid grid-cols-2 gap-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-xs sm:grid-cols-4">
+            <div>
+              <span className="text-slate-500">Detected Key / Scale</span>
+              <div className="mt-0.5 font-semibold text-indigo-900" data-testid="detected-key-badge">
+                {bestKeyEst ? `${bestKeyEst.scaleName} (${bestKeyEst.confidence}%)` : "—"}
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500">Estimated Tempo</span>
+              <div className="mt-0.5 font-semibold text-indigo-900">{bpm} BPM</div>
+            </div>
+            <div>
+              <span className="text-slate-500">Note Pitch Range</span>
+              <div className="mt-0.5 font-semibold text-indigo-900">{pitchRangeText}</div>
+            </div>
+            <div>
+              <span className="text-slate-500">Active Scale Lock</span>
+              <div className="mt-0.5 font-semibold text-emerald-700">{scale}</div>
+            </div>
+          </div>
+
           {/* 碎音清理、自动调式识别与量化控制栏 */}
           <div className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
@@ -808,22 +1043,23 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={ async () => {
+                onClick={async () => {
                   await stopPlayback();
                   setRawNotes([]);
                 }}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
               >
-                New Audio
+                New File
               </button>
-              <button
-                type="button"
-                onClick={playOriginalAudio}
-                disabled={!sourceAudio}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-              >
-                {playing === "source" ? "⏹ Stop Original" : "🎧 Play Original Audio"}
-              </button>
+              {sourceAudio && (
+                <button
+                  type="button"
+                  onClick={playOriginalAudio}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  {playing === "source" ? "⏹ Stop Original" : "🎧 Play Original"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={playPreview}
@@ -839,6 +1075,14 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
               >
                 {copied ? "✓ Copied Notes" : "📋 Copy Notes"}
+              </button>
+              <button
+                type="button"
+                onClick={downloadSynthWav}
+                disabled={!cleanedNotes.length}
+                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                ⬇ Synth .WAV
               </button>
               <button
                 type="button"

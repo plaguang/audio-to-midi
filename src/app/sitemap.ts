@@ -9,6 +9,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/hum-to-midi",
     "/mp3-to-midi",
     "/wav-to-midi",
+    "/midi-player-online",
+    "/audio-key-finder",
     "/stereo-to-mono-converter",
   ].map((p, i) => ({
     url: `${SITE}${p}`,

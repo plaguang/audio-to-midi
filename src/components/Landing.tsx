@@ -19,6 +19,8 @@ const NAV_LINKS = [
   { href: "/hum-to-midi", label: "Hum to MIDI" },
   { href: "/mp3-to-midi", label: "MP3 to MIDI" },
   { href: "/wav-to-midi", label: "WAV to MIDI" },
+  { href: "/midi-player-online", label: "MIDI Player" },
+  { href: "/audio-key-finder", label: "Key & BPM Finder" },
   { href: "/stereo-to-mono-converter", label: "Stereo to Mono" },
 ];
 

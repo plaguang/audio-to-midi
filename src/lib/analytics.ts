@@ -11,6 +11,7 @@ declare global {
 
 export type ToolEventName =
   | "audio_upload"
+  | "midi_file_upload"
   | "mic_record_start"
   | "mic_record_complete"
   | "demo_melody_load"
@@ -19,6 +20,7 @@ export type ToolEventName =
   | "play_original_audio"
   | "copy_note_names"
   | "download_midi"
+  | "download_synth_wav"
   | "stereo_file_upload"
   | "stereo_demo_load"
   | "play_stereo_preview"
