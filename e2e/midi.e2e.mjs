@@ -11,6 +11,7 @@ const assert = (cond, msg) => {
 (async () => {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const context = await browser.newContext({ acceptDownloads: true });
+  await context.route(/googletagmanager|google-analytics|clarity\.ms|_vercel\/insights/i, (route) => route.abort());
   const page = await context.newPage();
 
   const consoleErrors = [];
@@ -37,12 +38,9 @@ const assert = (cond, msg) => {
   const navCount = await page.locator('header nav a').count();
   assert(navCount === 8, `Sticky top navbar renders all 8 tool links (got: ${navCount})`);
 
-  // Verify Analytics (GA4 + Microsoft Clarity + Vercel Analytics) are injected
-  const htmlContent = await page.content();
-  assert(
-    htmlContent.includes('G-8764ZP2KQ1') && htmlContent.includes('yxcpqk8xbw'),
-    'GA4 (G-8764ZP2KQ1) and Microsoft Clarity (yxcpqk8xbw) scripts are active on page'
-  );
+  // Verify automated webdriver session suppresses analytics pollution
+  const isBlocked = await page.evaluate(() => navigator.webdriver === true && typeof window.gtag === 'undefined');
+  assert(isBlocked, 'Automated WebDriver session suppresses GA4 / Clarity / Vercel Analytics tracking');
 
   // Load Demo Melody (with stray notes)
   await page.getByRole('button', { name: /Load Demo Melody/i }).click();
