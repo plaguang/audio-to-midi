@@ -120,10 +120,10 @@ const assert = (cond, msg) => {
 
   // Test .MID file import on /midi-player-online
   console.log('2. Testing Online MIDI Player & .MID Import (/midi-player-online)');
-  await page.goto(`${BASE}/midi-player-online`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/midi-player-online`, { waitUntil: 'networkidle' });
   const tmpMidi = '/tmp/test-reimport.mid';
   fs.writeFileSync(tmpMidi, midiBuf);
-  await page.setInputFiles('input[type="file"]', tmpMidi);
+  await page.locator('input[type="file"]').setInputFiles(tmpMidi);
   await page.waitForSelector('[data-testid="note-stats"]', { timeout: 10000 });
   const importedStats = await page.getByTestId('note-stats').textContent();
   assert(importedStats?.includes('Clean notes: 5'), `Re-imported .MID file parsed 5 notes onto Piano Roll`);
