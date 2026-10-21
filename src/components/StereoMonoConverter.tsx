@@ -264,7 +264,7 @@ export default function StereoMonoConverter() {
       {!left ? (
         <div className="flex flex-col gap-4">
           <label
-            className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-10 text-center transition hover:border-indigo-600"
+            className="relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 sm:p-10 text-center transition hover:border-indigo-600 active:scale-[0.99]"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -275,12 +275,15 @@ export default function StereoMonoConverter() {
             <input
               type="file"
               accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a"
-              className="hidden"
+              className="sr-only"
               onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
             />
-            <span className="text-4xl">🎧</span>
-            <span className="text-lg font-semibold">Drop a Stereo MP3, WAV, FLAC or OGG file here</span>
-            <span className="text-sm text-slate-500">
+            <span className="pointer-events-none text-4xl">🎧</span>
+            <span className="pointer-events-none text-lg font-semibold">Drop a Stereo MP3, WAV, FLAC or OGG file here</span>
+            <span className="pointer-events-none inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-xs">
+              📂 Tap or Click Here to Choose Stereo Audio File
+            </span>
+            <span className="pointer-events-none text-sm text-slate-500">
               Choose (L+R)/2 sum, Left-only, Right-only or Side-isolation with phase correlation &amp; live waveform check
             </span>
           </label>

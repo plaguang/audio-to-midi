@@ -834,7 +834,8 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
       {!rawNotes.length ? (
         <div className="flex flex-col gap-4">
           <label
-            className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-10 text-center transition hover:border-indigo-600"
+            data-testid="audio-dropzone-label"
+            className="relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-8 sm:p-10 text-center transition hover:border-indigo-600 active:scale-[0.99]"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -845,17 +846,20 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
             <input
               type="file"
               accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.webm,.mid,.midi"
-              className="hidden"
+              className="sr-only"
               onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
             />
-            <span className="text-4xl">🎹</span>
-            <span className="text-lg font-semibold">
+            <span className="pointer-events-none text-4xl">🎹</span>
+            <span className="pointer-events-none text-lg font-semibold">
               {busy ||
                 (defaultMode === "voice"
                   ? "Drop a voice/hummed recording, MP3/WAV or .MID file"
                   : "Drop an MP3, WAV, M4A, FLAC, voice recording or .MID file here")}
             </span>
-            <span className="text-sm text-slate-500">
+            <span className="pointer-events-none inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-xs">
+              📂 Tap or Click Here to Choose Audio / .MID File
+            </span>
+            <span className="pointer-events-none text-sm text-slate-500">
               100% private in-browser conversion · McLeod pitch tracker · Stray-note cleaner, Key/BPM detector &amp; Synth WAV export
             </span>
           </label>

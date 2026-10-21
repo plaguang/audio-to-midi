@@ -42,6 +42,13 @@ const assert = (cond, msg) => {
   const isBlocked = await page.evaluate(() => navigator.webdriver === true && typeof window.gtag === 'undefined');
   assert(isBlocked, 'Automated WebDriver session suppresses GA4 / Clarity / Vercel Analytics tracking');
 
+  // Verify FeedbackBar renders and allows rating + comment submission
+  await page.getByTestId('feedback-down-btn').click();
+  await page.getByTestId('feedback-comment-input').fill('Testing mobile dropzone & feedback widget');
+  await page.getByTestId('feedback-submit-btn').click();
+  const thanksText = await page.getByTestId('feedback-thanks').textContent();
+  assert(thanksText?.includes('Thank you!'), `FeedbackBar submitted successfully ("${thanksText?.trim()}")`);
+
   // Load Demo Melody (with stray notes)
   await page.getByRole('button', { name: /Load Demo Melody/i }).click();
   await page.waitForSelector('[data-testid="note-stats"]', { timeout: 10000 });

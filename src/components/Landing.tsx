@@ -1,5 +1,6 @@
 import MidiConverter from "@/components/MidiConverter";
 import StereoMonoConverter from "@/components/StereoMonoConverter";
+import FeedbackBar from "@/components/FeedbackBar";
 import Link from "next/link";
 
 export type AudioLandingProps = {
@@ -158,6 +159,8 @@ export default function Landing({ h1, lede, tool, steps, faqs, path }: AudioLand
         ) : (
           <MidiConverter defaultMode={tool === "midi-voice" ? "voice" : "audio"} />
         )}
+
+        <FeedbackBar toolName="Audio / MIDI Converter" theme="light" />
 
         <section className="grid gap-5 sm:grid-cols-3">
           {featureCards.map(([title, desc]) => (
