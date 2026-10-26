@@ -59,6 +59,8 @@ export type ToolEventName =
   | "play_stereo_preview"
   | "play_mono_preview"
   | "download_mono_wav"
+  | "play_chord_progression"
+  | "download_chord_midi"
   | "user_feedback";
 
 // 统一向 Vercel Analytics、Google Analytics 4 (GA4) 与 Microsoft Clarity 发送工具交互埋点（已屏蔽自动化测试流量）

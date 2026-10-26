@@ -30,6 +30,117 @@ const SCALES: Record<string, number[] | null> = {
   "C Major Pentatonic": [0, 2, 4, 7, 9],
 };
 
+// 每个调式对应的常用流行/电子伴奏和弦进行（I–V–vi–IV 与 vi–IV–I–V）及对应的 MIDI 三和弦音高
+const SCALE_HARMONY: Record<
+  string,
+  {
+    camelot: string;
+    majorProgression: string;
+    minorProgression: string;
+    chords: { label: string; midiNotes: number[] }[];
+  }
+> = {
+  "C Major / A Minor": {
+    camelot: "8B / 8A",
+    majorProgression: "C – G – Am – F (I–V–vi–IV)",
+    minorProgression: "Am – F – C – G (vi–IV–I–V)",
+    chords: [
+      { label: "C", midiNotes: [60, 64, 67] },
+      { label: "G", midiNotes: [55, 59, 62] },
+      { label: "Am", midiNotes: [57, 60, 64] },
+      { label: "F", midiNotes: [53, 57, 60] },
+    ],
+  },
+  "G Major / E Minor": {
+    camelot: "9B / 9A",
+    majorProgression: "G – D – Em – C (I–V–vi–IV)",
+    minorProgression: "Em – C – G – D (vi–IV–I–V)",
+    chords: [
+      { label: "G", midiNotes: [55, 59, 62] },
+      { label: "D", midiNotes: [62, 66, 69] },
+      { label: "Em", midiNotes: [52, 55, 59] },
+      { label: "C", midiNotes: [60, 64, 67] },
+    ],
+  },
+  "D Major / B Minor": {
+    camelot: "10B / 10A",
+    majorProgression: "D – A – Bm – G (I–V–vi–IV)",
+    minorProgression: "Bm – G – D – A (vi–IV–I–V)",
+    chords: [
+      { label: "D", midiNotes: [62, 66, 69] },
+      { label: "A", midiNotes: [57, 61, 64] },
+      { label: "Bm", midiNotes: [59, 62, 66] },
+      { label: "G", midiNotes: [55, 59, 62] },
+    ],
+  },
+  "A Major / F# Minor": {
+    camelot: "11B / 11A",
+    majorProgression: "A – E – F#m – D (I–V–vi–IV)",
+    minorProgression: "F#m – D – A – E (vi–IV–I–V)",
+    chords: [
+      { label: "A", midiNotes: [57, 61, 64] },
+      { label: "E", midiNotes: [52, 56, 59] },
+      { label: "F#m", midiNotes: [54, 57, 61] },
+      { label: "D", midiNotes: [62, 66, 69] },
+    ],
+  },
+  "E Major / C# Minor": {
+    camelot: "12B / 12A",
+    majorProgression: "E – B – C#m – A (I–V–vi–IV)",
+    minorProgression: "C#m – A – E – B (vi–IV–I–V)",
+    chords: [
+      { label: "E", midiNotes: [52, 56, 59] },
+      { label: "B", midiNotes: [59, 63, 66] },
+      { label: "C#m", midiNotes: [61, 64, 68] },
+      { label: "A", midiNotes: [57, 61, 64] },
+    ],
+  },
+  "F Major / D Minor": {
+    camelot: "7B / 7A",
+    majorProgression: "F – C – Dm – Bb (I–V–vi–IV)",
+    minorProgression: "Dm – Bb – F – C (vi–IV–I–V)",
+    chords: [
+      { label: "F", midiNotes: [53, 57, 60] },
+      { label: "C", midiNotes: [60, 64, 67] },
+      { label: "Dm", midiNotes: [62, 65, 69] },
+      { label: "Bb", midiNotes: [58, 62, 65] },
+    ],
+  },
+  "Bb Major / G Minor": {
+    camelot: "6B / 6A",
+    majorProgression: "Bb – F – Gm – Eb (I–V–vi–IV)",
+    minorProgression: "Gm – Eb – Bb – F (vi–IV–I–V)",
+    chords: [
+      { label: "Bb", midiNotes: [58, 62, 65] },
+      { label: "F", midiNotes: [53, 57, 60] },
+      { label: "Gm", midiNotes: [55, 58, 62] },
+      { label: "Eb", midiNotes: [51, 55, 58] },
+    ],
+  },
+  "Eb Major / C Minor": {
+    camelot: "5B / 5A",
+    majorProgression: "Eb – Bb – Cm – Ab (I–V–vi–IV)",
+    minorProgression: "Cm – Ab – Eb – Bb (vi–IV–I–V)",
+    chords: [
+      { label: "Eb", midiNotes: [51, 55, 58] },
+      { label: "Bb", midiNotes: [58, 62, 65] },
+      { label: "Cm", midiNotes: [60, 63, 67] },
+      { label: "Ab", midiNotes: [56, 60, 63] },
+    ],
+  },
+  "Ab Major / F Minor": {
+    camelot: "4B / 4A",
+    majorProgression: "Ab – Eb – Fm – Db (I–V–vi–IV)",
+    minorProgression: "Fm – Db – Ab – Eb (vi–IV–I–V)",
+    chords: [
+      { label: "Ab", midiNotes: [56, 60, 63] },
+      { label: "Eb", midiNotes: [51, 55, 58] },
+      { label: "Fm", midiNotes: [53, 56, 60] },
+      { label: "Db", midiNotes: [61, 65, 68] },
+    ],
+  },
+};
+
 function snapToScale(midi: number, allowed: number[] | null): number {
   if (!allowed) return midi;
   const pc = ((midi % 12) + 12) % 12;
@@ -447,7 +558,7 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
   const [quantize, setQuantize] = useState<"off" | "16" | "8">("off");
   const [timbre, setTimbre] = useState<SynthTimbre>("keys");
   const [recording, setRecording] = useState(false);
-  const [playing, setPlaying] = useState<false | "midi" | "source">(false);
+  const [playing, setPlaying] = useState<false | "midi" | "source" | "chords">(false);
   const [playheadSec, setPlayheadSec] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -829,6 +940,77 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
     trackToolEvent("copy_note_names", { notes: cleanedNotes.length });
   }
 
+  // 一键试听与当前检测调式匹配的四小节流行和弦进行（I–V–vi–IV）
+  async function playDetectedChordProgression() {
+    if (playing === "chords") {
+      await stopPlayback();
+      return;
+    }
+    await stopPlayback();
+    const keyName = bestKeyEst?.scaleName || "C Major / A Minor";
+    const harmony = SCALE_HARMONY[keyName] || SCALE_HARMONY["C Major / A Minor"];
+    setPlaying("chords");
+    trackToolEvent("play_chord_progression", { scale: keyName, bpm });
+
+    const ctx = new AudioContext();
+    activeAudioCtx.current = ctx;
+    const chordDur = Math.max(0.65, (60 / bpm) * 2);
+    const t0 = ctx.currentTime + 0.04;
+
+    harmony.chords.forEach((chord, idx) => {
+      const start = t0 + idx * chordDur;
+      for (const midi of chord.midiNotes) {
+        const freq = 440 * Math.pow(2, (midi - 69) / 12);
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.linearRampToValueAtTime(0.11, start + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + chordDur - 0.02);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + chordDur);
+      }
+    });
+
+    const totalDur = harmony.chords.length * chordDur;
+    setTimeout(() => {
+      if (activeAudioCtx.current === ctx) {
+        stopPlayback();
+      }
+    }, totalDur * 1000 + 80);
+  }
+
+  // 导出检测调式的配套四和弦进行 .MID 文件（方便用户直接拖入 DAW 伴奏轨）
+  function downloadChordProgressionMidi() {
+    const keyName = bestKeyEst?.scaleName || "C Major / A Minor";
+    const harmony = SCALE_HARMONY[keyName] || SCALE_HARMONY["C Major / A Minor"];
+    const chordDur = Math.max(0.8, (60 / bpm) * 2);
+    const chordNotes: RawNote[] = [];
+    harmony.chords.forEach((chord, idx) => {
+      const startSec = idx * chordDur;
+      for (const midi of chord.midiNotes) {
+        chordNotes.push({
+          midi,
+          startSec,
+          durSec: chordDur * 0.92,
+          velocity: 92,
+          rms: 0.25,
+        });
+      }
+    });
+    const bytes = buildMidiFile(chordNotes, bpm);
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "audio/midi" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${fileName || "melody"}-chords-${keyName.split(" ")[0]}.mid`;
+    a.click();
+    URL.revokeObjectURL(url);
+    trackToolEvent("download_chord_midi", { scale: keyName, bpm });
+  }
+
   return (
     <div className="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       {!rawNotes.length ? (
@@ -885,26 +1067,71 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {/* 实时音乐特征检测概览栏（调式、BPM、音域、清洁音符数） */}
-          <div className="grid grid-cols-2 gap-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-xs sm:grid-cols-4">
-            <div>
-              <span className="text-slate-500">Detected Key / Scale</span>
-              <div className="mt-0.5 font-semibold text-indigo-900" data-testid="detected-key-badge">
-                {bestKeyEst ? `${bestKeyEst.scaleName} (${bestKeyEst.confidence}%)` : "—"}
+          {/* 实时音乐特征检测概览栏（调式、BPM、音域、清洁音符数 + 推荐和弦进行与一键伴奏试听/导出） */}
+          <div className="flex flex-col gap-3 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-white to-emerald-50/60 p-4 shadow-xs">
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+              <div>
+                <span className="text-slate-500">Detected Key / Scale</span>
+                <div className="mt-0.5 text-sm font-bold text-indigo-950" data-testid="detected-key-badge">
+                  {bestKeyEst ? `${bestKeyEst.scaleName} (${bestKeyEst.confidence}%)` : "—"}
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-500">Estimated Tempo &amp; Camelot</span>
+                <div className="mt-0.5 text-sm font-bold text-indigo-950">
+                  {bpm} BPM ·{" "}
+                  <span className="text-indigo-600">
+                    {(bestKeyEst && SCALE_HARMONY[bestKeyEst.scaleName]?.camelot) || "8B / 8A"}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-500">Note Pitch Range</span>
+                <div className="mt-0.5 text-sm font-bold text-indigo-950">{pitchRangeText}</div>
+              </div>
+              <div>
+                <span className="text-slate-500">Active Scale Lock</span>
+                <div className="mt-0.5 text-sm font-bold text-emerald-700">{scale}</div>
               </div>
             </div>
-            <div>
-              <span className="text-slate-500">Estimated Tempo</span>
-              <div className="mt-0.5 font-semibold text-indigo-900">{bpm} BPM</div>
-            </div>
-            <div>
-              <span className="text-slate-500">Note Pitch Range</span>
-              <div className="mt-0.5 font-semibold text-indigo-900">{pitchRangeText}</div>
-            </div>
-            <div>
-              <span className="text-slate-500">Active Scale Lock</span>
-              <div className="mt-0.5 font-semibold text-emerald-700">{scale}</div>
-            </div>
+
+            {bestKeyEst && SCALE_HARMONY[bestKeyEst.scaleName] && (
+              <div
+                data-testid="chord-progression-bar"
+                className="flex flex-wrap items-center justify-between gap-2 border-t border-indigo-100 pt-2.5 text-xs"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-slate-700">
+                  <span className="rounded bg-indigo-100 px-2 py-0.5 font-semibold text-indigo-800">
+                    🎼 Matching Chords
+                  </span>
+                  <span>
+                    <b>Major:</b> {SCALE_HARMONY[bestKeyEst.scaleName].majorProgression}
+                  </span>
+                  <span className="text-slate-300">|</span>
+                  <span>
+                    <b>Minor:</b> {SCALE_HARMONY[bestKeyEst.scaleName].minorProgression}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="play-chords-btn"
+                    onClick={playDetectedChordProgression}
+                    className="rounded-lg border border-indigo-300 bg-white px-2.5 py-1 font-semibold text-indigo-700 transition hover:bg-indigo-50"
+                  >
+                    {playing === "chords" ? "⏹ Stop Chords" : "🎹 Audition Backing Chords"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="download-chords-midi-btn"
+                    onClick={downloadChordProgressionMidi}
+                    className="rounded-lg bg-indigo-600 px-2.5 py-1 font-semibold text-white transition hover:bg-indigo-700"
+                  >
+                    ⬇ Export Chords .MID
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 碎音清理、自动调式识别与量化控制栏 */}

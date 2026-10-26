@@ -61,6 +61,22 @@ const assert = (cond, msg) => {
   const keyBadge = await page.getByTestId('detected-key-badge').textContent();
   assert(keyBadge?.includes('C Major / A Minor'), `Top summary bar displays Detected Key: "${keyBadge?.trim()}"`);
 
+  // Verify Matching Chord Progression bar & Export Chords .MID
+  const chordBarText = await page.getByTestId('chord-progression-bar').textContent();
+  assert(
+    chordBarText?.includes('C – G – Am – F') && chordBarText?.includes('Am – F – C – G'),
+    `Matching Chord Progression bar displays Major & Minor progressions ("${chordBarText?.slice(0, 80)}...")`
+  );
+  const [chordDl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByTestId('download-chords-midi-btn').click(),
+  ]);
+  const chordBuf = fs.readFileSync(await chordDl.path());
+  assert(
+    chordBuf.subarray(0, 4).toString('ascii') === 'MThd' && chordBuf.length > 40,
+    `Exported valid 4-chord backing progression .MID (${chordBuf.length} bytes)`
+  );
+
   // Test 1-Click Auto-Detect Key
   await page.getByRole('button', { name: /Auto-Detect Key/i }).click();
   const selectedScale = await page.getByLabel('Scale Lock').inputValue();
