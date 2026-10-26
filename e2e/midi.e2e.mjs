@@ -30,7 +30,7 @@ const assert = (cond, msg) => {
   page.on('pageerror', (e) => consoleErrors.push(e.message));
 
   console.log(`1. Testing Home / Audio to MIDI Converter (${BASE}/)`);
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
   const h1 = await page.locator('h1').textContent();
   assert(h1 && h1.includes('Audio to MIDI Converter'), `H1 rendered: "${h1?.trim()}"`);
 
@@ -145,7 +145,7 @@ const assert = (cond, msg) => {
   assert(importedStats?.includes('Clean notes: 5'), `Re-imported .MID file parsed 5 notes onto Piano Roll`);
 
   console.log('3. Testing Stereo to Mono WAV Converter (/stereo-to-mono-converter)');
-  await page.goto(`${BASE}/stereo-to-mono-converter`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE}/stereo-to-mono-converter`, { waitUntil: 'networkidle' });
   const smH1 = await page.locator('h1').textContent();
   assert(smH1 && smH1.includes('Stereo to Mono Converter'), `Stereo-to-Mono H1 rendered: "${smH1?.trim()}"`);
 
