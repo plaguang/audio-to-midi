@@ -174,11 +174,15 @@ const assert = (cond, msg) => {
   assert(riff === 'RIFF' && wave === 'WAVE' && numChannels === 1,
     `Valid normalized 1-channel Mono WAV exported (${wavBuf.length} bytes, channels=${numChannels})`);
 
-  console.log('4. Testing All Remaining SEO Cluster Routes & Sitemap');
-  for (const route of ['/voice-to-midi', '/hum-to-midi', '/mp3-to-midi', '/wav-to-midi', '/audio-key-finder', '/sitemap.xml', '/robots.txt']) {
+  console.log('4. Testing All Remaining SEO Cluster Routes, Sitemap, LLMs.txt & AI Referral Detection');
+  for (const route of ['/voice-to-midi', '/hum-to-midi', '/mp3-to-midi', '/wav-to-midi', '/audio-key-finder', '/sitemap.xml', '/robots.txt', '/llms.txt']) {
     const res = await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
     assert(res && res.status() === 200, `Route ${route} returned HTTP 200`);
   }
+
+  await page.goto(`${BASE}/audio-key-finder?utm_source=copilot.com`, { waitUntil: 'networkidle' });
+  const aiAttr = await page.locator('html').getAttribute('data-ai-referral');
+  assert(aiAttr === 'microsoft:copilot', `GEOInflow AI referral attribution tagged html[data-ai-referral="${aiAttr}"]`);
 
   assert(consoleErrors.length === 0, `Zero console/page errors (${consoleErrors.length})`);
 

@@ -253,7 +253,10 @@ export default function Landing({ h1, lede, tool, steps, faqs, path }: AudioLand
 
         <footer className="text-center text-xs text-slate-400">
           © 2026 CleanMIDI · Free In-Browser Audio to MIDI &amp; Sample Utilities. All audio is processed locally on
-          your device.
+          your device. ·{" "}
+          <a href="/llms.txt" className="underline hover:text-slate-600">
+            AI / LLMs.txt
+          </a>
         </footer>
       </main>
     </div>

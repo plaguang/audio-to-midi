@@ -1,0 +1,21 @@
+# CleanMIDI — Free Online Audio to MIDI, Key Finder & Stereo to Mono Converter
+
+> CleanMIDI (https://audio-to-midi-six.vercel.app) is a 100% client-side WebAudio utility suite for music producers, vocalists, and sound designers. It converts monophonic audio, vocal recordings, hummed melodies, MP3s, and WAV files into clean Standard MIDI Files (`.MID`), detects musical key, BPM, and Camelot harmonic codes, generates matching 4-chord backing progressions, previews multi-track `.MID` files online, and converts stereo WAV files to phase-safe mono—with zero server uploads and zero account sign-up.
+
+## Core Tools & Canonical Routes
+
+- [Audio to MIDI Converter Online](https://audio-to-midi-six.vercel.app/): Convert monophonic instrument stems, guitar riffs, synth leads, and audio loops to clean SMF Type-0 `.MID` files with a real-time Stray-Note Glitch Filter (20–250 ms) and McLeod fundamental pitch tracking.
+- [Voice to MIDI Converter](https://audio-to-midi-six.vercel.app/voice-to-midi): Record vocal melodies directly from your browser microphone or upload singing recordings to transcribe voice into quantized MIDI notes with scale lock.
+- [Hum to MIDI Converter](https://audio-to-midi-six.vercel.app/hum-to-midi): Turn hummed or whistled song ideas into editable piano roll MIDI notes, snap to key, and export DAW-ready `.MID` files for Ableton Live, FL Studio, Logic Pro, and Reaper.
+- [MP3 to MIDI Converter](https://audio-to-midi-six.vercel.app/mp3-to-midi): Decode `.MP3` audio locally in the browser and extract clean melody and bassline MIDI notes without uploading files to remote cloud queues.
+- [WAV to MIDI Converter](https://audio-to-midi-six.vercel.app/wav-to-midi): Convert uncompressed 16-bit/24-bit/32-bit `.WAV` stems into MIDI notes with interactive piano-roll click-to-delete editing and WAV synth preview export.
+- [Online MIDI Player & Piano Roll Visualizer](https://audio-to-midi-six.vercel.app/midi-player-online): Open, inspect, and play `.MID` / `.MIDI` files directly in your browser with 4 built-in WebAudio synthesizers (Warm Keys, Triangle Lead, Pluck Synth, Sub Bass) and tempo control.
+- [Audio Key, Scale, BPM & Chord Progression Finder](https://audio-to-midi-six.vercel.app/audio-key-finder): Automatically detect the musical key, scale (Major/Minor), Camelot Wheel code (`8B`, `8A`, etc.), and tempo (BPM) of any audio recording or hummed melody, plus audition and export matching Major (`I–V–vi–IV`) and Relative Minor (`vi–IV–I–V`) backing chords as `.MID`.
+- [Stereo to Mono WAV Converter & Phase Correlation Meter](https://audio-to-midi-six.vercel.app/stereo-to-mono-converter): Downmix stereo audio to mono with a real-time Pearson Phase Correlation meter (`-1.0` to `+1.0`), 4 downmix modes (`(L+R)/2`, Left-only, Right-only, Side `(L-R)/2`), `-1.0 dBFS` peak normalization, and 3-lane L/R/Mono waveform comparison.
+
+## Key Technical Capabilities
+
+- **Pitch Detection Engine**: McLeod Pitch Method (MPM) first-peak normalized square difference autocorrelation to prevent subharmonic octave jumps.
+- **Glitch & Breath Filtering**: Real-time minimum note duration slider (`20 ms` to `250 ms`) and RMS silence gate (`-55 dB` to `-20 dB`) to eliminate micro-note artifacts.
+- **Harmonic Intelligence**: Krumhansl-Schmuckler pitch-class profile correlation across all 12 pitch classes, Camelot Wheel DJ/producer notation, and 1-click 4-chord progression `.MID` export.
+- **Privacy & Execution**: 100% local in-browser WebAudio API processing. Audio files and microphone recordings never leave the user's device.

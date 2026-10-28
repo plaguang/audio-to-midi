@@ -3,7 +3,11 @@
 import React, { useEffect, useState } from "react";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
-import { isAutomatedOrInternalSession } from "@/lib/analytics";
+import {
+  isAutomatedOrInternalSession,
+  detectAiSearchReferral,
+  trackAiReferralIfPresent,
+} from "@/lib/analytics";
 
 export default function AnalyticsProvider({
   gaId,
@@ -17,6 +21,11 @@ export default function AnalyticsProvider({
   useEffect(() => {
     if (!isAutomatedOrInternalSession()) {
       setAllowTracking(true);
+      trackAiReferralIfPresent();
+    }
+    const aiMatch = detectAiSearchReferral();
+    if (aiMatch && typeof document !== "undefined") {
+      document.documentElement.dataset.aiReferral = `${aiMatch.platformId}:${aiMatch.productId}`;
     }
   }, []);
 
