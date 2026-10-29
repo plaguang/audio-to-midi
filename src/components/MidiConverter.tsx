@@ -543,7 +543,13 @@ function createDemoSamples(sr = 22050): { samples: Float32Array; sr: number } {
   return { samples: out, sr };
 }
 
-export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?: "audio" | "voice" }) {
+export default function MidiConverter({
+  defaultMode = "audio",
+  autoLoadDemo = false,
+}: {
+  defaultMode?: "audio" | "voice";
+  autoLoadDemo?: boolean;
+}) {
   const [rawNotes, setRawNotes] = useState<RawNote[]>([]);
   const [sourceAudio, setSourceAudio] = useState<{ samples: Float32Array; sr: number } | null>(null);
   const [removedIdx, setRemovedIdx] = useState<Set<number>>(new Set());
@@ -566,6 +572,16 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeAudioCtx = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!autoLoadDemo) return;
+    const { samples, sr } = createDemoSamples();
+    const notes = extractRawNotes(samples, sr);
+    setFileName("demo-vocal-melody");
+    setSourceAudio({ samples, sr });
+    setRawNotes(notes);
+    setBpm(estimateBpmFromNotes(notes));
+  }, [autoLoadDemo]);
 
   // 计算清理后的音符列表
   const cleanedNotes: (RawNote & { origIdx: number })[] = rawNotes
@@ -1067,6 +1083,33 @@ export default function MidiConverter({ defaultMode = "audio" }: { defaultMode?:
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* 已加载旋律时的常驻快速上传/录唱入口，方便在自动预加载面板直接替换自己的音频 */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50/40 px-4 py-2.5 text-xs">
+            <span className="font-medium text-slate-700">
+              🎵 Currently inspecting: <b className="text-indigo-950">{fileName || "melody"}</b> — want to analyze your own audio or MIDI file?
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="cursor-pointer rounded-lg bg-indigo-600 px-3 py-1.5 font-semibold text-white transition hover:bg-indigo-700">
+                📂 Upload MP3 / WAV / .MID
+                <input
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.webm,.mid,.midi"
+                  className="sr-only"
+                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={toggleMic}
+                className={`rounded-lg px-3 py-1.5 font-semibold text-white transition ${
+                  recording ? "animate-pulse bg-red-600" : "bg-slate-800 hover:bg-slate-900"
+                }`}
+              >
+                {recording ? "⏹ Stop Recording" : "🎙️ Record Voice / Hum"}
+              </button>
+            </div>
+          </div>
+
           {/* 实时音乐特征检测概览栏（调式、BPM、音域、清洁音符数 + 推荐和弦进行与一键伴奏试听/导出） */}
           <div className="flex flex-col gap-3 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-white to-emerald-50/60 p-4 shadow-xs">
             <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">

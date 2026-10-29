@@ -7,6 +7,7 @@ export type AudioLandingProps = {
   h1: string;
   lede: string;
   tool: "midi-audio" | "midi-voice" | "stereo-mono";
+  autoLoadDemo?: boolean;
   steps: string[];
   faqs: [string, string][];
   path: string;
@@ -25,7 +26,7 @@ const NAV_LINKS = [
   { href: "/stereo-to-mono-converter", label: "Stereo to Mono" },
 ];
 
-export default function Landing({ h1, lede, tool, steps, faqs, path }: AudioLandingProps) {
+export default function Landing({ h1, lede, tool, autoLoadDemo, steps, faqs, path }: AudioLandingProps) {
   const fullUrl = `${SITE}${path === "/" ? "" : path}`;
 
   const jsonLd = {
@@ -157,7 +158,10 @@ export default function Landing({ h1, lede, tool, steps, faqs, path }: AudioLand
         {tool === "stereo-mono" ? (
           <StereoMonoConverter />
         ) : (
-          <MidiConverter defaultMode={tool === "midi-voice" ? "voice" : "audio"} />
+          <MidiConverter
+            defaultMode={tool === "midi-voice" ? "voice" : "audio"}
+            autoLoadDemo={autoLoadDemo}
+          />
         )}
 
         <FeedbackBar toolName="Audio / MIDI Converter" theme="light" />

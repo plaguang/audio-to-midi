@@ -184,6 +184,13 @@ const assert = (cond, msg) => {
   const aiAttr = await page.locator('html').getAttribute('data-ai-referral');
   assert(aiAttr === 'microsoft:copilot', `GEOInflow AI referral attribution tagged html[data-ai-referral="${aiAttr}"]`);
 
+  // Verify /audio-key-finder auto-loads the interactive Key & BPM + Matching Chords panel on arrival
+  const autoKeyBadge = await page.getByTestId('detected-key-badge').textContent();
+  assert(
+    autoKeyBadge?.includes('C Major / A Minor'),
+    `/audio-key-finder auto-preloads interactive Key/BPM & Chord Progression panel ("${autoKeyBadge?.trim()}")`
+  );
+
   assert(consoleErrors.length === 0, `Zero console/page errors (${consoleErrors.length})`);
 
   await browser.close();

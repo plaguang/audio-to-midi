@@ -13,6 +13,7 @@ export default function AudioKeyFinderPage() {
     <Landing
       path="/audio-key-finder"
       tool="midi-audio"
+      autoLoadDemo
       h1="Audio Key & BPM Finder — Detect Scale, Tempo & Melody Notes"
       lede="Upload a vocal memo, sample loop, MP3 or WAV stem to instantly detect its musical key (Major / Relative Minor), estimated BPM tempo, pitch range and exact note sequence — all processed locally in your browser."
       steps={[
